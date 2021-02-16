@@ -117,4 +117,63 @@ KafkaConsumer 的实现不是线程安全的，所以我们在多线程的环境
 消费者是如何提交偏移量的呢？消费者会往一个叫做_consumer_offset 的特殊主题发送一个消息，里面会包括每个分区的偏移量。  
 如果消费者一直运行，偏移量的提交并不会产生任何影响。但是如果有消费者发生崩溃，或者有新的消费者加入消费者群组的时候，会触发 Kafka 的再均衡。这使得 Kafka 完成再均衡之后，每个消费者可能被会分到新分区中。为了能够继续之前的工作，消费者就需要读取每一个分区的最后一次提交的偏移量，然后从偏移量指定的地方继续处理。    
 - 如果提交的偏移量小于消费者实际处理的最后一个消息的偏移量，处于两个偏移量之间的消息会被重复处理
-- 如果提交的偏移量大于客户端处理的最后一个消息的偏移量,那么处于两个偏移量之间的消息将会丢失  
+- 如果提交的偏移量大于客户端处理的最后一个消息的偏移量,那么处于两个偏移量之间的消息将会丢失    
+####消费者提交偏移量的多种方式  
+1. 自动提交  
+> 最简单的提交方式是让消费者自动提交偏移量。 创建消费者时 enable.auto.comnit 被设为 true（默认），消费者会自动把从 poll()方法接收到的最大偏移量提交上去。提交时间间隔由 auto.commit.interval.ms 控制，默认值是 5s。  
+> 自动提交是在轮询里进行的，消费者每次在进行轮询时会检査是否该提交偏移量了，如果是，那么就会提交从上一次轮询返回的偏移量。  
+> 不过,在使用这种简便的方式之前,需要知道它将会带来怎样的结果。假设我们仍然使用默认的 5s 提交时间间隔, 在最近一次提交之后的 3s 发生了再均衡，再均衡之后,消费者从最后一次提交的偏移量位置开始读取消息。这个时候偏移量已经落后了 3s，所以在这 3s 内到达的消息会被重复处理。可以通过修改提交时间间隔来更频繁地提交偏移量, 减小可能出现重复消息的时间窗, 不过这种情况是无法完全避免的 。  
+> 在使用自动提交时,每次调用轮询方法都会把上一次调用返回的最大偏移量提交上去,它并不知道具体哪些消息已经被处理了,所以在再次调用之前最好确保所有当前调用返回的消息都已经处理完毕(enable.auto.comnit 被设为 true 时，在调用 close()方法之前也会进行自动提交)。一般情况下不会有什么问题,不过在处理异常或提前退出轮询时要格外小心。  
+> 自动提交虽然方便,但是很明显是一种基于时间提交的方式,而且没有为我们留有余地来避免重复处理消息。
+2. 手动提交  
+消费者 API 提供了多种手动提交偏移量的方式，可以在必要的时候手动提交,而不是基于时间间隔自动提交。首先把 enable.auto.commit 设为 false关闭自动提交。  
+- 同步  
+  使用 commitsync()同步提交偏移量最简单也最可靠。这个方法会提交由 poll()方法返回的最新偏移量，提交成功后马上返回,如果发生不可恢复不可重试的提交失败就抛出异常。
+注意： commitsync()将会提交由 poll()返回的最新偏移量,所以在处理完所有记录后要确保调用了 commitsync()，否则还是会有丢失进度的风险。如果发生了再均衡,从最近批消息到发生再均衡之间的所有消息都将被重复处理。  
+只要没有发生不可恢复的错误，commitSync（）方法会阻塞，会一直尝试直至提交成功，如果失败，也只能记录异常日志。
+具体使用，参见模块 kafka-no-spring 下包 commit 包中代码 CommitSync。
+- 异步  
+使用 commitsync()提交 在 broker 对提交请求作出回应之前，应用程序会一直阻塞。这时我们可以使用异步提交commitAsync（），只管发送提交请求，无需等待 broker的响应。commitAsync()也支持回调,在 broker 作出响应时会执行回调。回调经常被用于记录提交错误或生成度量指标。    
+    ```aidl
+       //TODO 异步提交偏移量
+       consumer.commitAsync();
+       /*允许执行回调*/
+       consumer.commitAsync(new OffsetCommitCallback() {
+           public void onComplete(Map<TopicPartition, OffsetAndMetadata> offsets,Exception exception) {
+               if(exception!=null){
+                   System.out.print("Commmit failed for offsets ");
+                   System.out.println(offsets);
+                   exception.printStackTrace();
+               }
+           }
+       });
+   ```  
+
+在成功提交或碰到无法恢复的错误之前, commitsync()会一直重试,但是 commitAsync 不会。它之所以不进行重试,是因为在它收到服务器响应的时候,可能有一个更大的偏移量已经提交成功,如果它会重试提交之前提交失败的偏移量 则是倒退擦除了进度 如果这时再平衡 就会重复消费。  
+
+- 同步和异步组合  
+一般情况下,针对偶尔出现的提交失败,（异步提交）不进行重试不会有太大问题，因为如果提交失败是因为临时问题导致的,那么后续的提交总会有成功的。但如果这是发生在关闭消费者或再均衡前的最后一次提交,就要确保能够提交成功。  
+因此,一般会组合使用 commitAsync()和 commitsync()，正常轮训消费是使用异步commitAsync()，保证万无一失最后一次关闭消费者时再finally里commitsync()同步提交一次。
+- 特定提交  
+在前面的手动提交中，提交偏移量的频率与处理消息批次的频率是一样的。但如果想要更频繁地提交该怎么办?  
+如果poll()方法返回一大批数据,为了避免因再均衡引起的重复处理整批消息,想要在批次中间提交偏移量该怎么办?这种情况无法通过调用commitSync()或 commitAsync()来实现，因为它们只会提交最后一个偏移量,而此时该批次里的消息还没有处理完。消费者 API 允许在调用 commitsync()和 commitAsync()方法时传进去希望提交的分区和偏移量的 map。假设我们处理了半个批次的消息,最后一个来自主题“customers”，分区 3 的消息的偏移量是 5000，你可以调用 commitsync()方法来提交它。不过，因为消费者可能不只读取一个分区,因为我们需要跟踪所有分区的偏移量,所以在这个层面上控制偏移量的提交会让代码变复杂。  
+使用方法：commitAsync()和 commitsync()都支持传入Map<TopicPartition, OffsetAndMetadata> offsets 对象指定分区和偏移量提交。    
+   ```aidl
+    //todo 构建包含要提交的主题分区 和 偏移量 信息的map
+     Map<TopicPartition, OffsetAndMetadata> currOffsets= new HashMap<TopicPartition, OffsetAndMetadata>();
+     int count = 0;
+      consumer.subscribe(Collections.singletonList( BusiConst.CONSUMER_COMMIT_TOPIC));
+      while(true){
+          ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(500));
+          for(ConsumerRecord<String, String> record:records){
+              //todo 分区及对应偏移量信息 放入map中
+              currOffsets.put(new TopicPartition(record.topic(),record.partition()),new OffsetAndMetadata(record.offset()+1,"no meta"));
+              //todo 每隔11个提交一次
+              if(count%11==0){
+                  //TODO 这里特定提交（加入偏移量map），每11条提交一次
+                  consumer.commitAsync(currOffsets,null);
+              }
+              count++;
+          }
+      }
+   ```
