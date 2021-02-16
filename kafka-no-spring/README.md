@@ -86,3 +86,5 @@ Kafka 里消费者从属于消费者群组，一个群组里的消费者订阅�
      properties.put("group.id","test1");
      KafkaConsumer<String,String> consumer = new KafkaConsumer<String, String>(properties);
    ```
+####消费者配置  
+同生产者，消费者也有很多属性可以设置，大部分都有合理的默认值，无需调整。有些参数可能对内存使用，性能和可靠性方面有较大影响。可以参考org.apache.kafka.clients.consumer 包下 ConsumerConfig 类。
