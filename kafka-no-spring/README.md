@@ -24,5 +24,8 @@
                             System.out.println("offset:"+metadata.offset()+"-"+"partition:"+metadata.partition());
                         }
                     }
-                });
+                });  
     ```  
+####生产者KafkaProducer对象是线程安全的  
+KafkaProducer 是线程安全的 可以多个线程使用同一个KafkaProducer对象 发送不同消息 不会相互影响。  
+
