@@ -24,11 +24,12 @@ public class HelloKafkaConsumer {
         properties.put("key.deserializer", StringDeserializer.class);//todo 反序列化
         properties.put("value.deserializer", StringDeserializer.class);
         //TODO 群组并非完全必须
-        properties.put(ConsumerConfig.GROUP_ID_CONFIG,"test1");
+        properties.put("group.id","test1");
         KafkaConsumer<String,String> consumer = new KafkaConsumer<String, String>(properties);
         try {
-            //TODO 消费者订阅主题（可以多个）
+              //TODO 1.消费者订阅主题（可以多个）
             consumer.subscribe(Collections.singletonList(BusiConst.HELLO_TOPIC));
+            // TODO  2.轮询 poll 消息
             while(true){
                 //TODO 拉取（新版本 Duration.ofMillis 超时时间）
                 ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(500));

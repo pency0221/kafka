@@ -68,7 +68,7 @@ ps:只有不改变主题分区数量的情况下，键和分区之间的映射�
 2. 创建生产者时通过属性“partitioner.class”指定使用自定义的分区器。  
    `   properties.put(ProducerConfig.PARTITIONER_CLASS_CONFIG, "cn.pency.selfpartition.SelfPartitioner");
    `
-##Kafka 的消费者  
+##Kafka 的消费者
 ####群组  
 Kafka 里消费者从属于消费者群组，一个群组里的消费者订阅的都是同一个主题，每个消费者接收主题一部分分区的消息。  
 - 消费者群组消费固定数量的分区的消息，不断往群组添加消费者，会动态再平衡消费者和负责消费分区的对应关系。  
@@ -87,4 +87,11 @@ Kafka 里消费者从属于消费者群组，一个群组里的消费者订阅�
      KafkaConsumer<String,String> consumer = new KafkaConsumer<String, String>(properties);
    ```
 ####消费者配置  
-同生产者，消费者也有很多属性可以设置，大部分都有合理的默认值，无需调整。有些参数可能对内存使用，性能和可靠性方面有较大影响。可以参考org.apache.kafka.clients.consumer 包下 ConsumerConfig 类。
+同生产者，消费者也有很多属性可以设置，大部分都有合理的默认值，无需调整。有些参数可能对内存使用，性能和可靠性方面有较大影响。可以参考org.apache.kafka.clients.consumer 包下 ConsumerConfig 类。  
+####订阅  
+创建消费者后，使用 subscribe()方法订阅主题，这个方法接受一个主题列表为参数，也可以接受一个正则表达式为参数；  
+如果新创建了新主题，并且主题名字和正则表达式匹配，那么会立即触发一次再均衡，消费者就可以读取新添加的主题。  
+比如，要订阅所有和 test相关的主题，可以 subscribe(“tets.*”)  
+####轮询poll消息  
+为了不断的获取消息，我们要在循环中不断的进行轮询，也就是不停调用 poll 方法。  
+poll 方法的参数为超时时间，控制 poll 方法的阻塞时间，它会让消费者在指定的毫秒数内一直等待 broker 返回数据。poll 方法将会返回一个记录（消息）列表，每一条记录都包含了记录所属的主题信息，记录所在分区信息，记录在分区里的偏移量，以及记录的键值对。  
