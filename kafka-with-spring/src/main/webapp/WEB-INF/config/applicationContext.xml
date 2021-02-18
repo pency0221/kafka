@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 查找最新的schemaLocation 访问 http://www.springframework.org/schema/ -->
+<beans xmlns="http://www.springframework.org/schema/beans"
+	   xmlns:context="http://www.springframework.org/schema/context"
+	   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	   xsi:schemaLocation="http://www.springframework.org/schema/beans
+        http://www.springframework.org/schema/beans/spring-beans-4.0.xsd
+        http://www.springframework.org/schema/context
+        http://www.springframework.org/schema/context/spring-context-4.0.xsd">
+
+     <!-- 配置扫描路径 -->
+     <context:component-scan base-package="cn.pency">
+     	<context:exclude-filter type="annotation" expression="org.springframework.stereotype.Controller"/>
+     </context:component-scan>
+
+    <context:property-placeholder location="classpath*:config/kafka.properties" />
+    <!--TODO 定义Properties参数  作为producer的参数 -->
+    <bean id="producerProperties" class="java.util.HashMap">
+        <constructor-arg>
+            <map>
+                <entry key="bootstrap.servers" value="${bootstrap.servers}" />
+                <entry key="key.serializer" value="org.apache.kafka.common.serialization.StringSerializer" />
+                <entry key="value.serializer" value="org.apache.kafka.common.serialization.StringSerializer" />
+            </map>
+        </constructor-arg>
+    </bean>
+
+    <!-- 创建kafkatemplate需要使用的producerfactory bean -->
+    <bean id="producerFactory" class="org.springframework.kafka.core.DefaultKafkaProducerFactory">
+        <constructor-arg>
+            <ref bean="producerProperties"/>
+        </constructor-arg>
+    </bean>
+
+    <!-- 发送监听器bean todo 用于接收发送结果回调通知-->
+    <bean id="sendListener" class="cn.pency.service.SendListener" />
+
+    <!-- TODO 创建kafkatemplate bean，使用的时候，只需要注入这个bean， 即可使用template的send消息方法-->
+    <bean id="kafkaTemplate" class="org.springframework.kafka.core.KafkaTemplate">
+        <constructor-arg ref="producerFactory" />
+        <!--todo 自动Flush发送线程中的数据-->
+        <constructor-arg name="autoFlush" value="true" />
+        <!-- TODO 指定 发送监听器bean -->
+        <property name="producerListener" ref="sendListener"></property>
+    </bean>
+
+
+    <!-- 1.定义consumer的参数 -->
+    <bean id="consumerProperties" class="java.util.HashMap">
+        <constructor-arg>
+            <map>
+                <entry key="bootstrap.servers" value="${bootstrap.servers}" />
+                <entry key="group.id" value="spring-kafka-group" />
+                <entry key="key.deserializer"  value="org.apache.kafka.common.serialization.StringDeserializer" />
+                <entry key="value.deserializer"  value="org.apache.kafka.common.serialization.StringDeserializer" />
+            </map>
+        </constructor-arg>
+    </bean>
+
+    <!-- 2.创建consumerFactory bean -->
+    <bean id="consumerFactory" class="org.springframework.kafka.core.DefaultKafkaConsumerFactory" >
+        <constructor-arg>
+            <ref bean="consumerProperties" />
+        </constructor-arg>
+    </bean>
+
+    <!-- 3.定义消费实现类 -->
+    <bean id="kafkaConsumerService" class="cn.pency.service.KafkaConsumer" />
+
+    <!-- TODO 4.消费者容器配置信息 绑定消费者和主题 -->
+    <bean id="containerProperties" class="org.springframework.kafka.listener.ContainerProperties">
+        <constructor-arg name="topics">
+            <list>
+                <value>kafka-spring-topic</value>
+            </list>
+        </constructor-arg>
+        <property name="messageListener" ref="kafkaConsumerService"></property>
+    </bean>
+    <!-- 5.消费者并发消息监听容器，执行doStart()方法 -->
+    <bean id="messageListenerContainer" class="org.springframework.kafka.listener.ConcurrentMessageListenerContainer"
+          init-method="doStart" >
+        <constructor-arg ref="consumerFactory" />
+        <constructor-arg ref="containerProperties" />
+        <!--消费者并行数-->
+        <property name="concurrency" value="${concurrency}" />
+    </bean>
+
+
+
+    <!--messageListenerContainer(->consumerFactory、ContainerProperties)
+    consumerFactory(->consumerPropertie)
+    ContainerProperties(->Topics,messageListener消费者)-->
+
+    <!-- 消费者自行确认-1.定义consumer的参数 -->
+    <bean id="consumerPropertiesAck" class="java.util.HashMap">
+        <constructor-arg>
+            <map>
+                <entry key="bootstrap.servers" value="${bootstrap.servers}" />
+                <entry key="group.id" value="spring-kafka-group-ack" />
+                <entry key="key.deserializer" value="org.apache.kafka.common.serialization.StringDeserializer" />
+                <entry key="value.deserializer" value="org.apache.kafka.common.serialization.StringDeserializer" />
+                <!--TODO 关闭自动提交-->
+                <entry key="enable.auto.commit" value="false"/>
+            </map>
+        </constructor-arg>
+    </bean>
+
+    <!-- 消费者自行确认-2.创建consumerFactory bean -->
+    <bean id="consumerFactoryAck" class="org.springframework.kafka.core.DefaultKafkaConsumerFactory" >
+        <constructor-arg>
+            <ref bean="consumerPropertiesAck" />
+        </constructor-arg>
+    </bean>
+
+    <!-- 消费者自行确认-3.定义消费实现类 -->
+    <bean id="kafkaConsumerServiceAck" class="cn.pency.service.KafkaConsumerAck" />
+
+    <!-- 消费者自行确认-4.消费者容器配置信息 -->
+    <bean id="containerPropertiesAck" class="org.springframework.kafka.listener.ContainerProperties">
+        <!-- topic -->
+        <constructor-arg name="topics">
+            <list>
+                <value>kafka-spring-topic-b</value>
+            </list>
+        </constructor-arg>
+        <property name="messageListener" ref="kafkaConsumerServiceAck" />
+        <!-- TODO 消费者自行手动提交偏移量 -->
+        <property name="ackMode" value="MANUAL_IMMEDIATE"></property>
+    </bean>
+    <!-- 消费者自行确认-5.消费者并发消息监听容器，执行doStart()方法 -->
+    <bean id="messageListenerContainerAck" class="org.springframework.kafka.listener.ConcurrentMessageListenerContainer"
+          init-method="doStart" >
+        <constructor-arg ref="consumerFactoryAck" />
+        <constructor-arg ref="containerPropertiesAck" />
+        <property name="concurrency" value="${concurrency}" />
+    </bean>
+
+</beans>
